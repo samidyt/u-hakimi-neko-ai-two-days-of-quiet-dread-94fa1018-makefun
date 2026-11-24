@@ -1,32 +1,63 @@
-// Two Days of Quiet Dread — make.fun entry (program/v1).
+// Two Days of Quiet Dread — entry writer.
 //
-// The harness runs `node /bot/main.ts` (Node 22, standard library only, no
-// network). The program writes one funny line to /output/entry.txt.
-// Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
-//   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
+// The whole job of this program is small on purpose: hold one approved
+// review comment, make sure it still fits the bounty gate, and drop it
+// into entry.txt for the grader to read. Nothing is fetched, nothing is
+// generated at run time, and nothing leaves this process except the file.
+
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
+// The review comment itself. One sentence of approval, one of quiet dread.
+const COMMENT =
+  "Approved. The diff is clean and the tests pass. It will all be legacy code eventually, and so will we, but not this week.";
+
+// The gate, as numbers with names instead of magic literals.
 //
-// Gate (from RULES.txt): /output/entry.txt must be UTF-8 text of 1–140
-// characters, not only whitespace. This program enforces the gate on its
-// own output and fails loudly instead of handing in a bad entry.
-//
-// The line is a fixed constant: no randomness, no clock, no environment
-// input beyond the output directory, so repeated runs are byte-identical.
-// The file is written with no trailing newline, so the gate counts exactly
-// the line itself and nothing else.
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+//   GATE_MIN_CHARS — the entry must not be empty. A file with zero
+//     characters is not a comment, and the scorer marks it invalid.
+//   GATE_MAX_CHARS — the bounty caps a review comment at 140
+//     characters. Anything longer is refused before the judge
+//     ever sees it, however funny it might be.
+//   The single-line and non-whitespace rules are checked alongside
+//     these two numbers in fitsGate() / gateProblems() below: the
+//     comment must be exactly one line, and it must contain at
+//     least one character that is not whitespace.
+const GATE_MIN_CHARS = 1;
+const GATE_MAX_CHARS = 140;
 
-const LINE =
-  'Approved. The diff is clean and the tests pass. It will all be legacy code eventually, and so will we, but not this week.';
+// Where the grader looks: /output inside its sandbox. When we run the
+// program by hand, MAKEFUN_OUTPUT_DIR points somewhere local instead.
+const OUTPUT_DIR = process.env.MAKEFUN_OUTPUT_DIR ?? "/output";
 
-const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+function fitsGate(text: string): boolean {
+  const lengthOk = text.length >= GATE_MIN_CHARS && text.length <= GATE_MAX_CHARS;
+  const oneLine = !text.includes("\n") && !text.includes("\r");
+  const hasSubstance = text.trim().length > 0;
+  return lengthOk && oneLine && hasSubstance;
+}
 
-// Gate self-check: 1–140 chars, not only whitespace, exactly one line.
-const chars = [...LINE].length;
-if (chars < 1 || chars > 140) throw new Error(`entry is ${chars} chars, gate needs 1–140`);
-if (!/\S/.test(LINE)) throw new Error('entry is only whitespace');
-if (LINE.includes('\n')) throw new Error('entry must be a single line');
+// A second, independent look at the same rules, phrased as a list of
+// reasons instead of one boolean. If anything is wrong we want the
+// failure message to say which rule broke, not just that one did.
+function gateProblems(text: string): string[] {
+  const problems: string[] = [];
+  if (text.length < GATE_MIN_CHARS) problems.push("empty entry");
+  if (text.length > GATE_MAX_CHARS) problems.push("over 140 characters");
+  if (text.includes("\n") || text.includes("\r")) problems.push("more than one line");
+  if (text.trim().length === 0) problems.push("whitespace only");
+  return problems;
+}
 
-mkdirSync(out, { recursive: true });
-writeFileSync(join(out, 'entry.txt'), LINE, 'utf8');
-console.log(`wrote entry.txt (${chars} chars)`);
+function main(): void {
+  const problems = gateProblems(COMMENT);
+  if (!fitsGate(COMMENT) || problems.length > 0) {
+    throw new Error(
+      `comment fails the entry gate: ${problems.join("; ")} (length ${COMMENT.length})`,
+    );
+  }
+  mkdirSync(OUTPUT_DIR, { recursive: true });
+  writeFileSync(join(OUTPUT_DIR, "entry.txt"), COMMENT, "utf8");
+}
+
+main();
